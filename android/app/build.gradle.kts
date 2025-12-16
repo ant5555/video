@@ -57,4 +57,11 @@ dependencies {
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
+
+    // Retrofit
+    implementation("com.squareup.retrofit2:retrofit:2.11.0")
+    // JSON Converter (Gson)
+    implementation("com.squareup.retrofit2:converter-gson:2.11.0")
+    // OkHttp (로그용)
+    implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
 }

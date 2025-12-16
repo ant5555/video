@@ -2,19 +2,25 @@ spring:
   application:
     name: video-backend
 
-  datasource:
-    url: jdbc:mysql://localhost:3306/video
-    username: video
-    password: secret
-    driver-class-name: com.mysql.cj.jdbc.Driver
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+      - org.springframework.boot.hibernate.autoconfigure.HibernateJpaAutoConfiguration
 
-  jpa:
-    hibernate:
-      ddl-auto: update
-    show-sql: true
-    properties:
-      hibernate:
-        format_sql: true
+  servlet:
+    multipart:
+      max-file-size: 500MB
+      max-request-size: 500MB
+      enabled: true
 
 server:
   port: 8080
+
+# NCP Object Storage 설정
+ncp:
+  object-storage:
+    endpoint: https://kr.object.ncloudstorage.com
+    region: kr-standard
+    access-key: ${NCP_ACCESS_KEY}
+    secret-key: ${NCP_SECRET_KEY}
+    bucket-name: video-upload-dev
