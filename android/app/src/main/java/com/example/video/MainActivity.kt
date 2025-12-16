@@ -82,9 +82,19 @@ fun VideoUploadScreen(
                 Text(text = "No video selected")
             }
             is UploadState.Uploading -> {
-                CircularProgressIndicator()
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(text = "Uploading...")
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    LinearProgressIndicator(
+                        progress = { state.progress / 100f },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(8.dp)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(text = "Uploading... ${state.progress}%")
+                }
             }
             is UploadState.Success -> {
                 Text(

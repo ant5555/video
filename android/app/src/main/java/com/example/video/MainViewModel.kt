@@ -9,11 +9,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import okhttp3.MediaType
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
-import okhttp3.RequestBody.Companion.asRequestBody
+import okhttp3.RequestBody
+import okio.BufferedSink
 import java.io.File
-import java.io.FileOutputStream
+import java.io.FileInputStream
 
 class MainViewModel : ViewModel() {
 
@@ -23,11 +25,19 @@ class MainViewModel : ViewModel() {
     fun uploadVideo(context: Context, videoUri: Uri) {
         viewModelScope.launch {
             try {
-                _uploadState.value = UploadState.Uploading
+                _uploadState.value = UploadState.Uploading(0)
 
                 // Uri에서 파일로 변환
                 val file = uriToFile(context, videoUri)
-                val requestFile = file.asRequestBody("video/*".toMediaTypeOrNull())
+
+                // 진행률을 추적하는 RequestBody 생성
+                val requestFile = ProgressRequestBody(
+                    file,
+                    "video/*".toMediaTypeOrNull()
+                ) { progress ->
+                    _uploadState.value = UploadState.Uploading(progress)
+                }
+
                 val body = MultipartBody.Part.createFormData("file", file.name, requestFile)
 
                 // API 호출
@@ -71,9 +81,39 @@ class MainViewModel : ViewModel() {
     }
 }
 
+class ProgressRequestBody(
+    private val file: File,
+    private val contentType: MediaType?,
+    private val onProgressUpdate: (Int) -> Unit
+) : RequestBody() {
+
+    override fun contentType(): MediaType? = contentType
+
+    override fun contentLength(): Long = file.length()
+
+    override fun writeTo(sink: BufferedSink) {
+        val fileLength = file.length()
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        val inputStream = FileInputStream(file)
+        var uploaded = 0L
+
+        inputStream.use { input ->
+            var read: Int
+            while (input.read(buffer).also { read = it } != -1) {
+                uploaded += read
+                sink.write(buffer, 0, read)
+
+                // 진행률 계산 (0-100)
+                val progress = (100 * uploaded / fileLength).toInt()
+                onProgressUpdate(progress)
+            }
+        }
+    }
+}
+
 sealed class UploadState {
     object Idle : UploadState()
-    object Uploading : UploadState()
+    data class Uploading(val progress: Int) : UploadState()
     data class Success(val message: String, val filename: String) : UploadState()
     data class Error(val message: String) : UploadState()
 }

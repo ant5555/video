@@ -13,17 +13,12 @@ import java.util.UUID
 @RequestMapping("/video")
 class VideoController {
 
-    private val uploadDir = System.getProperty("user.home") + "/Desktop/boostcamp/membership/program/video/uploads/videos"
+    private val uploadDir = System.getProperty("user.home") + "/Desktop/upload/videos"
 
     init {
         // 업로드 디렉토리 생성
         File(uploadDir).mkdirs()
         println("Upload directory: $uploadDir")
-    }
-
-    @GetMapping
-    fun video(): String {
-        return "OK"
     }
 
     @PostMapping("/upload")
