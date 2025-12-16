@@ -1,33 +1,51 @@
 package com.example.video
 
-import okhttp3.MultipartBody
-import okhttp3.RequestBody
 import retrofit2.Response
-import retrofit2.http.GET
-import retrofit2.http.Multipart
 import retrofit2.http.POST
-import retrofit2.http.Part
 
 interface ApiService {
 
-    @Multipart
-    @POST("video/upload")
-    suspend fun uploadVideo(
-        @Part file: MultipartBody.Part
-    ): Response<UploadResponse>
+    @POST("video/initiate-multipart")
+    @retrofit2.http.FormUrlEncoded
+    suspend fun initiateMultipartUpload(
+        @retrofit2.http.Field("filename") filename: String,
+        @retrofit2.http.Field("contentType") contentType: String
+    ): Response<MultipartUploadResponse>
 
-    @GET("video/list")
-    suspend fun getVideoList(): Response<List<VideoInfo>>
+    @POST("video/part-presigned-url")
+    @retrofit2.http.FormUrlEncoded
+    suspend fun getPartPresignedUrl(
+        @retrofit2.http.Field("filename") filename: String,
+        @retrofit2.http.Field("uploadId") uploadId: String,
+        @retrofit2.http.Field("partNumber") partNumber: Int
+    ): Response<PartPresignedUrlResponse>
+
+    @POST("video/complete-multipart")
+    suspend fun completeMultipartUpload(
+        @retrofit2.http.Query("filename") filename: String,
+        @retrofit2.http.Query("uploadId") uploadId: String,
+        @retrofit2.http.Body parts: List<CompletedPartInfo>,
+        @retrofit2.http.Query("clientUploadTimeMs") clientUploadTimeMs: Long
+    ): Response<CompleteUploadResponse>
 }
 
-data class UploadResponse(
-    val message: String,
+data class MultipartUploadResponse(
+    val uploadId: String,
     val filename: String,
-    val size: String
+    val key: String
 )
 
-data class VideoInfo(
+data class PartPresignedUrlResponse(
+    val url: String
+)
+
+data class CompletedPartInfo(
+    val partNumber: Int,
+    val eTag: String
+)
+
+data class CompleteUploadResponse(
+    val message: String,
     val filename: String,
-    val size: String,
-    val path: String
+    val url: String
 )

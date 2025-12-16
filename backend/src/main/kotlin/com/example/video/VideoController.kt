@@ -3,8 +3,6 @@ package com.example.video
 import org.slf4j.LoggerFactory
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
-import org.springframework.web.multipart.MultipartFile
-import kotlin.system.measureTimeMillis
 
 @RestController
 @RequestMapping("/video")
@@ -13,50 +11,53 @@ class VideoController(
 ) {
     private val logger = LoggerFactory.getLogger(VideoController::class.java)
 
-    @GetMapping
-    fun video(): String {
-        return "OK"
+    @PostMapping("/initiate-multipart")
+    fun initiateMultipartUpload(
+        @RequestParam("filename") filename: String,
+        @RequestParam("contentType") contentType: String
+    ): ResponseEntity<MultipartUploadResponse> {
+        val startTime = System.currentTimeMillis()
+        val response = objectStorageService.initiateMultipartUpload(filename, contentType)
+        val duration = System.currentTimeMillis() - startTime
+        logger.info("[MULTIPART-START] $filename | uploadId: ${response.uploadId} | ${duration}ms")
+        return ResponseEntity.ok(response)
     }
 
-    @PostMapping("/upload")
-    fun uploadVideo(@RequestParam("file") file: MultipartFile): ResponseEntity<Map<String, String>> {
-        val totalStartTime = System.currentTimeMillis()
-        logger.info("========== 업로드 요청 시작 ==========")
-        logger.info("파일명: ${file.originalFilename}")
-        logger.info("파일 크기: ${file.size / 1024 / 1024}MB (${file.size} bytes)")
-        logger.info("Content-Type: ${file.contentType}")
-
-        try {
-            var filename: String
-            val uploadTime = measureTimeMillis {
-                filename = objectStorageService.uploadFile(file)
-            }
-            logger.info("NCP Object Storage 업로드 시간: ${uploadTime}ms (${uploadTime / 1000.0}초)")
-
-            val fileUrl = objectStorageService.getFileUrl(filename)
-
-            val totalTime = System.currentTimeMillis() - totalStartTime
-            logger.info("전체 처리 시간: ${totalTime}ms (${totalTime / 1000.0}초)")
-            logger.info("업로드 속도: ${(file.size / 1024.0 / 1024.0) / (totalTime / 1000.0)} MB/s")
-            logger.info("========== 업로드 완료 ==========")
-
-            return ResponseEntity.ok(mapOf(
-                "message" to "Video uploaded successfully to NCP Object Storage",
-                "filename" to filename,
-                "url" to fileUrl,
-                "size" to file.size.toString(),
-                "uploadTimeMs" to uploadTime.toString(),
-                "totalTimeMs" to totalTime.toString()
-            ))
-        } catch (e: Exception) {
-            val totalTime = System.currentTimeMillis() - totalStartTime
-            logger.error("업로드 실패 (${totalTime}ms): ${e.message}", e)
-            return ResponseEntity.internalServerError().body(mapOf("error" to "Upload failed: ${e.message}"))
-        }
+    @PostMapping("/part-presigned-url")
+    fun getPartPresignedUrl(
+        @RequestParam("filename") filename: String,
+        @RequestParam("uploadId") uploadId: String,
+        @RequestParam("partNumber") partNumber: Int
+    ): ResponseEntity<Map<String, String>> {
+        val url = objectStorageService.generatePartPresignedUrl(filename, uploadId, partNumber)
+        logger.info("[MULTIPART-PART] $filename | part: $partNumber")
+        return ResponseEntity.ok(mapOf("url" to url))
     }
 
-    @GetMapping("/list")
-    fun listVideos(): ResponseEntity<List<Map<String, String>>> {
-        return ResponseEntity.ok(emptyList())
+    @PostMapping("/complete-multipart")
+    fun completeMultipartUpload(
+        @RequestParam("filename") filename: String,
+        @RequestParam("uploadId") uploadId: String,
+        @RequestParam("clientUploadTimeMs") clientUploadTimeMs: Long,
+        @RequestBody parts: List<CompletedPartInfo>
+    ): ResponseEntity<Map<String, String>> {
+        val startTime = System.currentTimeMillis()
+        val completedFilename = objectStorageService.completeMultipartUpload(filename, uploadId, parts)
+        val fileUrl = objectStorageService.getFileUrl(completedFilename)
+        val duration = System.currentTimeMillis() - startTime
+
+        val totalParts = parts.size
+        val estimatedSize = totalParts * 5 // 5MB per part (approximate)
+        val uploadSpeedMBps = if (clientUploadTimeMs > 0) {
+            String.format("%.2f", (estimatedSize * 1000.0) / clientUploadTimeMs)
+        } else "N/A"
+
+        logger.info("[MULTIPART-COMPLETE] $filename | ${totalParts}parts (~${estimatedSize}MB) | 총 업로드: ${clientUploadTimeMs}ms (${clientUploadTimeMs/1000.0}초) | 속도: ${uploadSpeedMBps}MB/s | 완료처리: ${duration}ms")
+
+        return ResponseEntity.ok(mapOf(
+            "message" to "Upload completed successfully",
+            "filename" to completedFilename,
+            "url" to fileUrl
+        ))
     }
 }

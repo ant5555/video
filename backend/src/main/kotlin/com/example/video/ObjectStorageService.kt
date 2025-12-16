@@ -1,36 +1,86 @@
 package com.example.video
 
 import org.springframework.stereotype.Service
-import org.springframework.web.multipart.MultipartFile
-import software.amazon.awssdk.core.sync.RequestBody
 import software.amazon.awssdk.services.s3.S3Client
-import software.amazon.awssdk.services.s3.model.PutObjectRequest
-import java.util.UUID
+import software.amazon.awssdk.services.s3.model.*
+import software.amazon.awssdk.services.s3.presigner.S3Presigner
+import java.time.Duration
 
 @Service
 class ObjectStorageService(
     private val s3Client: S3Client,
+    private val s3Presigner: S3Presigner,
     private val properties: ObjectStorageProperties
 ) {
 
-    fun uploadFile(file: MultipartFile): String {
-        val originalFilename = file.originalFilename ?: "video"
-        val fileExtension = originalFilename.substringAfterLast(".", "mp4")
-        val uniqueFilename = "${UUID.randomUUID()}.$fileExtension"
+    fun initiateMultipartUpload(filename: String, contentType: String): MultipartUploadResponse {
+        val objectKey = "videos/$filename"
 
-        val putObjectRequest = PutObjectRequest.builder()
+        val request = CreateMultipartUploadRequest.builder()
             .bucket(properties.bucketName)
-            .key("videos/$uniqueFilename")
-            .contentType(file.contentType)
-            .contentLength(file.size)
+            .key(objectKey)
+            .contentType(contentType)
             .build()
 
-        s3Client.putObject(
-            putObjectRequest,
-            RequestBody.fromInputStream(file.inputStream, file.size)
-        )
+        val response = s3Client.createMultipartUpload(request)
 
-        return uniqueFilename
+        return MultipartUploadResponse(
+            uploadId = response.uploadId(),
+            filename = filename,
+            key = objectKey
+        )
+    }
+
+    fun generatePartPresignedUrl(
+        filename: String,
+        uploadId: String,
+        partNumber: Int
+    ): String {
+        val objectKey = "videos/$filename"
+
+        val uploadPartRequest = UploadPartRequest.builder()
+            .bucket(properties.bucketName)
+            .key(objectKey)
+            .uploadId(uploadId)
+            .partNumber(partNumber)
+            .build()
+
+        val presignRequest = software.amazon.awssdk.services.s3.presigner.model.UploadPartPresignRequest.builder()
+            .signatureDuration(Duration.ofMinutes(30))
+            .uploadPartRequest(uploadPartRequest)
+            .build()
+
+        return s3Presigner.presignUploadPart(presignRequest).url().toString()
+    }
+
+    fun completeMultipartUpload(
+        filename: String,
+        uploadId: String,
+        parts: List<CompletedPartInfo>
+    ): String {
+        val objectKey = "videos/$filename"
+
+        val completedParts = parts.map { part ->
+            CompletedPart.builder()
+                .partNumber(part.partNumber)
+                .eTag(part.eTag)
+                .build()
+        }
+
+        val completedMultipartUpload = CompletedMultipartUpload.builder()
+            .parts(completedParts)
+            .build()
+
+        val request = CompleteMultipartUploadRequest.builder()
+            .bucket(properties.bucketName)
+            .key(objectKey)
+            .uploadId(uploadId)
+            .multipartUpload(completedMultipartUpload)
+            .build()
+
+        s3Client.completeMultipartUpload(request)
+
+        return filename
     }
 
     fun getFileUrl(filename: String): String {
@@ -44,3 +94,14 @@ class ObjectStorageService(
         }
     }
 }
+
+data class MultipartUploadResponse(
+    val uploadId: String,
+    val filename: String,
+    val key: String
+)
+
+data class CompletedPartInfo(
+    val partNumber: Int,
+    val eTag: String
+)

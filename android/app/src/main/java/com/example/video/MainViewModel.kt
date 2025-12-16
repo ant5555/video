@@ -27,39 +27,29 @@ class MainViewModel : ViewModel() {
             try {
                 _uploadState.value = UploadState.Uploading(0)
 
-                // Uri에서 파일로 변환
-                val file = uriToFile(context, videoUri)
+                val apiService = NetworkModule.retrofit.create(ApiService::class.java)
+                val uploadManager = MultipartUploadManager(
+                    context = context,
+                    apiService = apiService,
+                    onProgressUpdate = { progress ->
+                        _uploadState.value = UploadState.Uploading(progress)
+                    }
+                )
 
-                // 진행률을 추적하는 RequestBody 생성
-                val requestFile = ProgressRequestBody(
-                    file,
-                    "video/*".toMediaTypeOrNull()
-                ) { progress ->
-                    _uploadState.value = UploadState.Uploading(progress)
-                }
+                val result = uploadManager.uploadVideo(videoUri)
 
-                val body = MultipartBody.Part.createFormData("file", file.name, requestFile)
-
-                // API 호출
-                val response = NetworkModule
-                    .retrofit
-                    .create(ApiService::class.java)
-                    .uploadVideo(body)
-
-                if (response.isSuccessful) {
-                    val uploadResponse = response.body()
+                if (result.isSuccess) {
+                    val url = result.getOrNull()!!
                     _uploadState.value = UploadState.Success(
-                        uploadResponse?.message ?: "Upload successful",
-                        uploadResponse?.filename ?: ""
+                        "Upload successful",
+                        url
                     )
-                    Log.d("Upload", "Success: ${uploadResponse?.filename}")
+                    Log.d("Upload", "Success: $url")
                 } else {
-                    _uploadState.value = UploadState.Error("Upload failed: ${response.code()}")
-                    Log.e("Upload", "Failed: ${response.code()}")
+                    val error = result.exceptionOrNull()
+                    _uploadState.value = UploadState.Error("Upload failed: ${error?.message}")
+                    Log.e("Upload", "Failed: ${error?.message}", error)
                 }
-
-                // 임시 파일 삭제
-                file.delete()
             } catch (e: Exception) {
                 _uploadState.value = UploadState.Error("Upload error: ${e.message}")
                 Log.e("Upload", "Error", e)
