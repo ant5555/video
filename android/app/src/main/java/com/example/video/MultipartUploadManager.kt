@@ -4,13 +4,17 @@ import android.content.Context
 import android.net.Uri
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import java.io.InputStream
 import java.util.UUID
+import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.atomic.AtomicLong
 
 class MultipartUploadManager(
     private val context: Context,
@@ -19,6 +23,7 @@ class MultipartUploadManager(
 ) {
     private val client = OkHttpClient()
     private val PART_SIZE = 5 * 1024 * 1024 // 5MB
+    private val PARALLEL_UPLOAD_COUNT = 4
 
     suspend fun uploadVideo(videoUri: Uri): Result<String> = withContext(Dispatchers.IO) {
         try {
@@ -40,60 +45,63 @@ class MultipartUploadManager(
             val uploadId = uploadData.uploadId
             Log.d("MultipartUpload", "Upload ID: $uploadId")
 
-            // 3. 파일을 파트로 분할하여 업로드
+            // 3. 파일을 파트로 분할하여 병렬 업로드
             val inputStream = context.contentResolver.openInputStream(videoUri)
                 ?: return@withContext Result.failure(Exception("파일 열기 실패"))
 
             val totalParts = (fileSize + PART_SIZE - 1) / PART_SIZE
-            val completedParts = mutableListOf<CompletedPartInfo>()
+            val channel = Channel<Pair<Int, ByteArray>>(PARALLEL_UPLOAD_COUNT)
+            val completedParts = ConcurrentLinkedQueue<CompletedPartInfo>()
+            val uploadedBytes = AtomicLong(0)
 
-            inputStream.use { stream ->
-                var partNumber = 1
-                var uploadedBytes = 0L
-
-                while (uploadedBytes < fileSize) {
-                    val partSize = minOf(PART_SIZE.toLong(), fileSize - uploadedBytes).toInt()
-                    val buffer = ByteArray(partSize)
-                    var bytesRead = 0
-
-                    // 버퍼 채우기
-                    while (bytesRead < partSize) {
-                        val read = stream.read(buffer, bytesRead, partSize - bytesRead)
-                        if (read == -1) break
-                        bytesRead += read
+            coroutineScope {
+                // Producer: 파트를 순차적으로 읽어 Channel에 전달
+                launch {
+                    inputStream.use { stream ->
+                        var partNumber = 1
+                        var bytesReadTotal = 0L
+                        while (bytesReadTotal < fileSize) {
+                            val partSize = minOf(PART_SIZE.toLong(), fileSize - bytesReadTotal).toInt()
+                            val buffer = ByteArray(partSize)
+                            var bytesRead = 0
+                            while (bytesRead < partSize) {
+                                val read = stream.read(buffer, bytesRead, partSize - bytesRead)
+                                if (read == -1) break
+                                bytesRead += read
+                            }
+                            if (bytesRead == 0) break
+                            channel.send(partNumber to buffer.copyOf(bytesRead))
+                            bytesReadTotal += bytesRead
+                            partNumber++
+                        }
                     }
+                    channel.close()
+                }
 
-                    if (bytesRead == 0) break
+                // Consumer: N개의 코루틴이 병렬로 업로드
+                repeat(PARALLEL_UPLOAD_COUNT) {
+                    launch {
+                        for ((partNumber, data) in channel) {
+                            Log.d("MultipartUpload", "Part $partNumber/$totalParts 업로드 중 (${data.size} bytes)")
 
-                    Log.d("MultipartUpload", "Part $partNumber/$totalParts 업로드 중 (${bytesRead} bytes)")
+                            val urlResponse = apiService.getPartPresignedUrl(uniqueFileName, uploadId, partNumber)
+                            if (!urlResponse.isSuccessful) throw Exception("Presigned URL 가져오기 실패 (Part $partNumber)")
 
-                    // 4. Part Presigned URL 가져오기
-                    val urlResponse = apiService.getPartPresignedUrl(
-                        uniqueFileName,
-                        uploadId,
-                        partNumber
-                    )
+                            val presignedUrl = urlResponse.body()!!.url
+                            val eTag = uploadPart(presignedUrl, data, data.size)
+                                ?: throw Exception("Part $partNumber 업로드 실패")
 
-                    if (!urlResponse.isSuccessful) {
-                        return@withContext Result.failure(Exception("Presigned URL 가져오기 실패"))
+                            completedParts.add(CompletedPartInfo(partNumber, eTag))
+
+                            val uploaded = uploadedBytes.addAndGet(data.size.toLong())
+                            onProgressUpdate((uploaded * 100 / fileSize).toInt())
+                        }
                     }
-
-                    val presignedUrl = urlResponse.body()!!.url
-
-                    // 5. Presigned URL로 직접 업로드
-                    val eTag = uploadPart(presignedUrl, buffer, bytesRead)
-                        ?: return@withContext Result.failure(Exception("Part $partNumber 업로드 실패"))
-
-                    completedParts.add(CompletedPartInfo(partNumber, eTag))
-
-                    uploadedBytes += bytesRead
-                    partNumber++
-
-                    // 진행률 업데이트
-                    val progress = (uploadedBytes * 100 / fileSize).toInt()
-                    onProgressUpdate(progress)
                 }
             }
+
+            // partNumber 순으로 정렬
+            val sortedParts = completedParts.sortedBy { it.partNumber }
 
             // 6. Multipart Upload 완료
             val totalUploadTime = System.currentTimeMillis() - uploadStartTime
@@ -101,7 +109,7 @@ class MultipartUploadManager(
             val completeResponse = apiService.completeMultipartUpload(
                 uniqueFileName,
                 uploadId,
-                completedParts,
+                sortedParts,
                 totalUploadTime
             )
 
