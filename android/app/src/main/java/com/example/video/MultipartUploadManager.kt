@@ -3,6 +3,7 @@ package com.example.video
 import android.content.Context
 import android.net.Uri
 import android.util.Log
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
@@ -24,6 +25,8 @@ class MultipartUploadManager(
     private val client = OkHttpClient()
     private val PART_SIZE = 5 * 1024 * 1024 // 5MB
     private val PARALLEL_UPLOAD_COUNT = 4
+    private val MAX_RETRY_COUNT = 3
+    private val RETRY_DELAY_MS = 1000L
 
     suspend fun uploadVideo(videoUri: Uri): Result<String> = withContext(Dispatchers.IO) {
         try {
@@ -84,12 +87,30 @@ class MultipartUploadManager(
                         for ((partNumber, data) in channel) {
                             Log.d("MultipartUpload", "Part $partNumber/$totalParts 업로드 중 (${data.size} bytes)")
 
-                            val urlResponse = apiService.getPartPresignedUrl(uniqueFileName, uploadId, partNumber)
-                            if (!urlResponse.isSuccessful) throw Exception("Presigned URL 가져오기 실패 (Part $partNumber)")
+                            var lastException: Exception? = null
+                            var eTag: String? = null
 
-                            val presignedUrl = urlResponse.body()!!.url
-                            val eTag = uploadPart(presignedUrl, data, data.size)
-                                ?: throw Exception("Part $partNumber 업로드 실패")
+                            for (attempt in 1..MAX_RETRY_COUNT) {
+                                try {
+                                    val urlResponse = apiService.getPartPresignedUrl(uniqueFileName, uploadId, partNumber)
+                                    if (!urlResponse.isSuccessful) throw Exception("Presigned URL 가져오기 실패 (Part $partNumber)")
+
+                                    val presignedUrl = urlResponse.body()!!.url
+                                    eTag = uploadPart(presignedUrl, data, data.size)
+                                    if (eTag == null) throw Exception("Part $partNumber 업로드 실패")
+
+                                    break
+                                } catch (e: Exception) {
+                                    lastException = e
+                                    if (attempt < MAX_RETRY_COUNT) {
+                                        val delayMs = RETRY_DELAY_MS * (1 shl (attempt - 1))
+                                        Log.w("MultipartUpload", "Part $partNumber 재시도 $attempt/$MAX_RETRY_COUNT (${delayMs}ms 후)")
+                                        delay(delayMs)
+                                    }
+                                }
+                            }
+
+                            if (eTag == null) throw (lastException ?: Exception("Part $partNumber 업로드 실패"))
 
                             completedParts.add(CompletedPartInfo(partNumber, eTag))
 
