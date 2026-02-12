@@ -21,14 +21,14 @@ class MultipartUploadManager(
     private val context: Context,
     private val apiService: ApiService,
     private val onProgressUpdate: (Int) -> Unit
-) {
+) : VideoUploader {
     private val client = OkHttpClient()
     private val PART_SIZE = 5 * 1024 * 1024 // 5MB
     private val PARALLEL_UPLOAD_COUNT = 4
     private val MAX_RETRY_COUNT = 3
     private val RETRY_DELAY_MS = 1000L
 
-    suspend fun uploadVideo(videoUri: Uri): Result<String> = withContext(Dispatchers.IO) {
+    override suspend fun uploadVideo(videoUri: Uri): Result<String> = withContext(Dispatchers.IO) {
         try {
             val uploadStartTime = System.currentTimeMillis()
 

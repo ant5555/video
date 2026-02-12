@@ -28,7 +28,7 @@ class MainViewModel : ViewModel() {
                 _uploadState.value = UploadState.Uploading(0)
 
                 val apiService = NetworkModule.retrofit.create(ApiService::class.java)
-                val uploadManager = MultipartUploadManager(
+                val uploadManager: VideoUploader = MultipartUploadManager(
                     context = context,
                     apiService = apiService,
                     onProgressUpdate = { progress ->
