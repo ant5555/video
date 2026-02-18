@@ -11,6 +11,21 @@ class VideoController(
 ) {
     private val logger = LoggerFactory.getLogger(VideoController::class.java)
 
+    @PostMapping("/presigned-url")
+    fun getPresignedUrl(
+        @RequestParam("filename") filename: String,
+        @RequestParam("contentType") contentType: String
+    ): ResponseEntity<Map<String, String>> {
+        val url = objectStorageService.generatePutPresignedUrl(filename, contentType)
+        val fileUrl = objectStorageService.getFileUrl(filename)
+        logger.info("[SINGLE-UPLOAD] presigned URL 생성: $filename")
+        return ResponseEntity.ok(mapOf(
+            "url" to url,
+            "filename" to filename,
+            "fileUrl" to fileUrl
+        ))
+    }
+
     @PostMapping("/initiate-multipart")
     fun initiateMultipartUpload(
         @RequestParam("filename") filename: String,

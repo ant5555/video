@@ -39,6 +39,10 @@ class ObjectStorageConfig(
 
     @Bean
     fun s3Presigner(): S3Presigner {
+        val s3Config = S3Configuration.builder()
+            .pathStyleAccessEnabled(true)
+            .build()
+
         return S3Presigner.builder()
             .endpointOverride(URI.create(properties.endpoint))
             .region(Region.of(properties.region))
@@ -50,6 +54,7 @@ class ObjectStorageConfig(
                     )
                 )
             )
+            .serviceConfiguration(s3Config)
             .build()
     }
 }

@@ -87,6 +87,23 @@ class ObjectStorageService(
         return "${properties.endpoint}/${properties.bucketName}/videos/$filename"
     }
 
+    fun generatePutPresignedUrl(filename: String, contentType: String): String {
+        val objectKey = "videos/$filename"
+
+        val putObjectRequest = PutObjectRequest.builder()
+            .bucket(properties.bucketName)
+            .key(objectKey)
+            .contentType(contentType)
+            .build()
+
+        val presignRequest = software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest.builder()
+            .signatureDuration(Duration.ofMinutes(30))
+            .putObjectRequest(putObjectRequest)
+            .build()
+
+        return s3Presigner.presignPutObject(presignRequest).url().toString()
+    }
+
     fun deleteFile(filename: String) {
         s3Client.deleteObject { builder ->
             builder.bucket(properties.bucketName)
