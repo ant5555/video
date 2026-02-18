@@ -5,6 +5,13 @@ import retrofit2.http.POST
 
 interface ApiService {
 
+    @POST("video/presigned-url")
+    @retrofit2.http.FormUrlEncoded
+    suspend fun getPresignedUrl(
+        @retrofit2.http.Field("filename") filename: String,
+        @retrofit2.http.Field("contentType") contentType: String
+    ): Response<PresignedUrlResponse>
+
     @POST("video/initiate-multipart")
     @retrofit2.http.FormUrlEncoded
     suspend fun initiateMultipartUpload(
@@ -42,6 +49,12 @@ data class PartPresignedUrlResponse(
 data class CompletedPartInfo(
     val partNumber: Int,
     val eTag: String
+)
+
+data class PresignedUrlResponse(
+    val url: String,
+    val filename: String,
+    val fileUrl: String
 )
 
 data class CompleteUploadResponse(
